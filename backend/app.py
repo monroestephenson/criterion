@@ -576,19 +576,24 @@ def get_recommendations(movie_id):
         # Format recommendations
         recommendations = []
         for similar_id, similarity in similar_movies:
+            # Get metadata from subtitle embeddings
             metadata = app_models['subtitle'][similar_id]['metadata']
             recommendations.append({
                 'title': metadata.get('title', ''),
-                'similarity': round(similarity * 100, 1),
+                'similarity': round(float(similarity) * 100, 1),  # Ensure similarity is a float
                 'slug': similar_id,
-                'year': metadata.get('year', ''),
+                'year': metadata.get('year', ''),  # Add year for poster lookup
                 'director': metadata.get('director', ''),
                 'genres': metadata.get('genres', [])
             })
         
         logger.info(f"Found {len(recommendations)} recommendations for movie {movie_id}")
+        # Add debug logging
+        logger.info(f"Sample recommendation: {recommendations[0] if recommendations else 'None'}")
+        
         return jsonify({
-            "recommendations": recommendations
+            "recommendations": recommendations,
+            "status": "success"
         })
         
     except Exception as e:

@@ -213,33 +213,42 @@ def create_movie_clusters(subtitle_embeddings, review_model_tuple, n_clusters=20
 
 def find_similar_movies(movie_id, clustering_results, top_k=10):
     """Find similar movies using Faiss for fast nearest neighbor search"""
-    if movie_id not in clustering_results['movie_ids']:
-        logger.error(f"Movie ID {movie_id} not found in clustering results")
-        return []
-    
-    idx = clustering_results['movie_ids'].index(movie_id)
-    movie_embedding = clustering_results['embeddings'][idx].reshape(1, -1).astype('float32')
-    movie_cluster = clustering_results['clusters'][idx]
-    
-    # Use Faiss for fast similarity search
-    D, I = clustering_results['faiss_index'].search(movie_embedding, top_k + 1)  # +1 because it includes self
-    
-    # Format results (skip the first result as it's the query movie itself)
-    similarities = []
-    for dist, idx in zip(D[0][1:], I[0][1:]):
-        other_id = clustering_results['movie_ids'][idx]
-        other_cluster = clustering_results['clusters'][idx]
+    try:
+        if movie_id not in clustering_results['movie_ids']:
+            logger.error(f"Movie ID {movie_id} not found in clustering results")
+            return []
         
-        # Convert L2 distance to similarity score
-        similarity = 1 / (1 + dist)
+        idx = clustering_results['movie_ids'].index(movie_id)
+        movie_embedding = clustering_results['embeddings'][idx].reshape(1, -1).astype('float32')
+        movie_cluster = clustering_results['clusters'][idx]
         
-        # Boost similarity for same cluster
-        if other_cluster == movie_cluster:
-            similarity *= 1.2
+        # Use Faiss for fast similarity search
+        D, I = clustering_results['faiss_index'].search(movie_embedding, top_k + 1)
+        
+        # Format results (skip the first result as it's the query movie itself)
+        similarities = []
+        for dist, idx in zip(D[0][1:], I[0][1:]):
+            other_id = clustering_results['movie_ids'][idx]
+            other_cluster = clustering_results['clusters'][idx]
             
-        similarities.append((other_id, similarity))
-    
-    return similarities
+            # Convert L2 distance to similarity score (0 to 1 range)
+            similarity = 1.0 / (1.0 + float(dist))
+            
+            # Boost similarity for same cluster
+            if other_cluster == movie_cluster and other_cluster != -1:  # -1 is noise cluster
+                similarity *= 1.2
+            
+            # Ensure similarity is between 0 and 1
+            similarity = min(max(similarity, 0.0), 1.0)
+            
+            similarities.append((other_id, similarity))
+        
+        logger.info(f"Found {len(similarities)} similar movies for {movie_id}")
+        return similarities
+        
+    except Exception as e:
+        logger.exception(f"Error finding similar movies for {movie_id}")
+        return []
 
 def save_clustering_results(clustering_results, save_path):
     """Save clustering results to disk"""

@@ -1,0 +1,21 @@
+# Backend
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Frontend
+frontend/favorite-movie-app/node_modules/
+frontend/favorite-movie-app/.pnp
+frontend/favorite-movie-app/.pnp.js
+frontend/favorite-movie-app/coverage/
+frontend/favorite-movie-app/build/
+frontend/favorite-movie-app/.DS_Store
+frontend/favorite-movie-app/.env.local
+frontend/favorite-movie-app/.env.development.local
+frontend/favorite-movie-app/.env.test.local
+frontend/favorite-movie-app/.env.production.local
+frontend/favorite-movie-app/npm-debug.log*
+frontend/favorite-movie-app/yarn-debug.log*
+frontend/favorite-movie-app/yarn-error.log* 
