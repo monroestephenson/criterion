@@ -1,0 +1,7 @@
+flask
+flask-cors
+sentence-transformers
+numpy
+tqdm
+torch
+# Add any other dependencies your model requires
