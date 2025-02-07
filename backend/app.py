@@ -169,9 +169,10 @@ def recommend():
         if not username:
             return jsonify({"error": "Username is required."}), 400
 
-        # Load subtitle-based model first
-        with open("./data/advanced_subtitle_embeddings.pkl", 'rb') as f:
-            subtitle_embeddings = pickle.load(f)
+        # Use already loaded subtitle embeddings from MODELS
+        subtitle_embeddings = MODELS['subtitle']
+        if subtitle_embeddings is None:
+            return jsonify({"error": "Subtitle model not properly initialized"}), 500
 
         # Try Letterboxd first, passing subtitle_embeddings
         user_movies = get_letterboxd_reviews(username, subtitle_embeddings)
