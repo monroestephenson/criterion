@@ -13,6 +13,8 @@ import os
 from urllib.parse import urlparse
 from collections import defaultdict
 import pickle
+import io
+import mmap
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -314,46 +316,88 @@ def load_random_user_data(reviews_dir="/Users/monroestephenson/Downloads/Criteri
     logger.info(f"Selected user '{selected_user}' with {len(user_movies)} unique Criterion Collection reviews")
     return selected_user, user_movies
 
-def save_model_and_embeddings(model, movie_embeddings, save_dir="/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/model_cache"):
-    """Save model and embeddings to disk."""
-    save_dir = Path(save_dir)
-    save_dir.mkdir(exist_ok=True)
+def save_model_and_embeddings(model, movie_embeddings, cache_dir):
+    """Save model and embeddings to cache with device handling and numpy arrays"""
+    logger.info("Moving model to CPU before saving...")
+    
+    # Move model to CPU before saving
+    if hasattr(model, 'to'):
+        model = model.to('cpu')
+    
+    model_path = os.path.join(cache_dir, "transformer_model.pkl")
+    embeddings_path = os.path.join(cache_dir, "movie_embeddings.npz")
+    metadata_path = os.path.join(cache_dir, "metadata.pkl")
+    
+    # Convert embeddings to numpy arrays
+    slugs = []
+    vectors = []
+    metadata = {}
+    
+    for slug, data in movie_embeddings.items():
+        slugs.append(slug)
+        vectors.append(data['embedding'])
+        metadata[slug] = data['metadata']
+    
+    # Save embeddings as numpy array
+    logger.info(f"Saving embeddings to {embeddings_path}")
+    np.savez_compressed(embeddings_path, 
+                       slugs=np.array(slugs), 
+                       vectors=np.stack(vectors))
+    
+    # Save metadata separately
+    logger.info(f"Saving metadata to {metadata_path}")
+    with open(metadata_path, 'wb') as f:
+        pickle.dump(metadata, f)
     
     # Save model
-    model_path = save_dir / "transformer_model.pkl"
+    logger.info(f"Saving model to {model_path}")
     with open(model_path, 'wb') as f:
         pickle.dump(model, f)
-    logger.info(f"Saved model to {model_path}")
-    
-    # Save embeddings
-    embeddings_path = save_dir / "movie_embeddings.pkl"
-    with open(embeddings_path, 'wb') as f:
-        pickle.dump(movie_embeddings, f)
-    logger.info(f"Saved embeddings to {embeddings_path}")
 
-def load_cached_model_and_embeddings(cache_dir="/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/model_cache"):
-    """Load model and embeddings from disk if they exist."""
-    cache_dir = Path(cache_dir)
-    model_path = cache_dir / "transformer_model.pkl"
-    embeddings_path = cache_dir / "movie_embeddings.pkl"
+def load_cached_model_and_embeddings(cache_dir):
+    """Load cached model and embeddings if they exist using memory mapping"""
+    model_path = os.path.join(cache_dir, "transformer_model.pkl")
+    embeddings_path = os.path.join(cache_dir, "movie_embeddings.npz")
+    metadata_path = os.path.join(cache_dir, "metadata.pkl")
     
-    if model_path.exists() and embeddings_path.exists():
-        try:
-            # Load model
-            with open(model_path, 'rb') as f:
-                model = pickle.load(f)
-            logger.info(f"Loaded cached model from {model_path}")
+    if not all(os.path.exists(p) for p in [model_path, embeddings_path, metadata_path]):
+        return None, None
+        
+    try:
+        # Load model
+        logger.info("Loading model file...")
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+            if hasattr(model, 'to'):
+                model = model.to('cpu')
+        logger.info("Successfully loaded model")
+        
+        # Load embeddings using numpy memory mapping
+        logger.info("Memory mapping embeddings file...")
+        embeddings_data = np.load(embeddings_path, mmap_mode='r')
+        slugs = embeddings_data['slugs']
+        vectors = embeddings_data['vectors']
+        
+        # Load metadata
+        logger.info("Loading metadata...")
+        with open(metadata_path, 'rb') as f:
+            metadata = pickle.load(f)
+        
+        # Reconstruct embeddings dictionary using memory-mapped arrays
+        movie_embeddings = {}
+        for i, slug in enumerate(slugs):
+            movie_embeddings[str(slug)] = {
+                'embedding': vectors[i],
+                'metadata': metadata[str(slug)]
+            }
             
-            # Load embeddings
-            with open(embeddings_path, 'rb') as f:
-                movie_embeddings = pickle.load(f)
-            logger.info(f"Loaded cached embeddings from {embeddings_path}")
-            
-            return model, movie_embeddings
-        except Exception as e:
-            logger.warning(f"Error loading cached files: {e}")
-            return None, None
-    return None, None
+        logger.info("Successfully loaded embeddings")
+        
+        return model, movie_embeddings
+        
+    except Exception as e:
+        logger.error(f"Error loading cached files: {str(e)}")
+        return None, None
 
 if __name__ == "__main__":
     try:

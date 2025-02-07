@@ -10,8 +10,14 @@ import logging
 import faiss
 import pickle
 import os
+import psutil
 
 logger = logging.getLogger(__name__)
+
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    process = psutil.Process()
+    return process.memory_info().rss / 1024 / 1024
 
 class MovieEmbeddingNetwork(nn.Module):
     """Neural network for learning movie embeddings with larger dimensions"""
@@ -280,4 +286,40 @@ def load_clustering_results(load_path):
     results['nn_index'] = nn
     
     logger.info(f"Loaded clustering results from {load_path}")
-    return results 
+    return results
+
+def load_or_create_clusters(models):
+    """Load existing clusters or create new ones"""
+    logger.info("Starting cluster loading/creation process")
+    
+    try:
+        # Try to load existing clusters
+        clustering_model_path = "./data/models/movie_clusters.pkl"
+        logger.info("Attempting to load existing clusters from %s", clustering_model_path)
+        clustering_results = load_clustering_results(clustering_model_path)
+        
+        if clustering_results is None:
+            logger.info("No existing clusters found, creating new ones")
+            logger.info("Memory usage before cluster creation: %.2f MB", get_memory_usage())
+            
+            clustering_results = create_movie_clusters(
+                models['subtitle'],
+                models['review']
+            )
+            
+            logger.info("Memory usage after cluster creation: %.2f MB", get_memory_usage())
+            
+            if clustering_results:
+                logger.info("Saving newly created clusters")
+                save_clustering_results(clustering_results, clustering_model_path)
+            else:
+                logger.error("Failed to create clusters")
+                
+        else:
+            logger.info("Successfully loaded existing clusters")
+            
+        return clustering_results
+        
+    except Exception as e:
+        logger.exception("Error in cluster loading/creation: %s", str(e))
+        return None 

@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  backend:
+    image: movie-app-backend
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_ENV=development
+    volumes:
+      - ./backend:/app
+      - ./backend/data:/app/data:rw
+      - type: tmpfs
+        target: /dev/shm
+        tmpfs:
+          size: 2G
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    networks:
+      - movie-app-network
+
+  frontend:
+    image: movie-app-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - REACT_APP_API_URL=http://localhost:5001
+    networks:
+      - movie-app-network
+
+networks:
+  movie-app-network:
+    driver: bridge 

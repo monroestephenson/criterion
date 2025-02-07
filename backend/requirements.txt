@@ -4,4 +4,10 @@ sentence-transformers
 numpy
 tqdm
 torch
+beautifulsoup4
+requests
+scikit-learn
+faiss-cpu
+pickle5
+psutil==5.9.8
 # Add any other dependencies your model requires

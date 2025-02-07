@@ -3,6 +3,9 @@ from flask_cors import CORS
 import logging
 import json
 import os
+import sys
+import psutil
+import gc
 from transformer_builder import (
     load_transformer_model,
     build_movie_embeddings,
@@ -19,76 +22,142 @@ import time
 from collections import defaultdict
 import pickle
 from transformer_builder_scripts import compute_movie_similarity
-from movie_clustering import create_movie_clusters, find_similar_movies, save_clustering_results, load_clustering_results
-app = Flask(__name__)
-app_models = None
-clustering_results = None
+from movie_clustering import (
+    create_movie_clusters, 
+    find_similar_movies, 
+    save_clustering_results, 
+    load_clustering_results,
+    load_or_create_clusters
+)
 
-# Update CORS configuration to allow all endpoints
-CORS(app, resources={
-    r"/*": {  # This allows all routes
-        "origins": ["http://localhost:3000"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    }
-})
+# Configure logging with more detailed format
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - Memory: %(memory_usage).2f MB'
+)
 
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / 1024 / 1024
+
+# Add memory usage to log record
+old_factory = logging.getLogRecordFactory()
+
+def record_factory(*args, **kwargs):
+    record = old_factory(*args, **kwargs)
+    record.memory_usage = get_memory_usage()
+    return record
+
+logging.setLogRecordFactory(record_factory)
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
-# Load or build your model and embeddings on startup.
-MODEL_CACHE_DIR = "/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/model_cache"
-processed_file = "/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/processed_movies.json"
+# Initialize Flask app
+app = Flask(__name__)
+CORS(app)
 
-model, movie_embeddings = load_cached_model_and_embeddings(MODEL_CACHE_DIR)
-if model is None or movie_embeddings is None:
-    logger.info("Cached model not found, building model and embeddings...")
-    with open(processed_file, "r", encoding="utf-8") as f:
-        processed_movies = json.load(f)
-    model = load_transformer_model()
-    movie_embeddings = build_movie_embeddings(processed_movies, model)
-    save_model_and_embeddings(model, movie_embeddings, MODEL_CACHE_DIR)
-
-# At the top of your file with other imports
-CRITERION_MOVIES_PATH = "/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/criterion_collection/criterion_movies.json"
-MOVIES_LIST_PATH = "/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/movies_list.json"
-
-# Load both movie lists at startup
-with open(CRITERION_MOVIES_PATH, 'r') as f:
-    CRITERION_MOVIES = {movie['title'].lower(): movie for movie in json.load(f)}
-
-with open(MOVIES_LIST_PATH, 'r') as f:
-    REVIEW_MOVIES = {movie['title'].lower(): movie for movie in json.load(f)}
+# Global variables
+MODELS = None
+clustering_results = None
+CRITERION_MOVIES = None
+REVIEW_MOVIES = None
 
 MODEL_PATHS = {
-    'review_model': "/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/model_cache",
-    'subtitle_model': "/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/models/advanced_subtitle_embeddings.pkl",
-    'clustering_model': "/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/models/movie_clusters.pkl"
+    'review_model': "./data/model_cache",
+    'subtitle_model': "./data/models/advanced_subtitle_embeddings.pkl",
+    'clustering_model': "./data/models/movie_clusters.pkl"
 }
 
 def load_models():
     """Load both models with proper error handling"""
+    global MODELS
+    if MODELS is not None:
+        logger.info("Using cached models")
+        return MODELS
+        
+    logger.info("Starting model loading process")
     models = {}
     
     try:
         # Load review model
+        logger.info("Loading review model from %s", MODEL_PATHS['review_model'])
         model, movie_embeddings = load_cached_model_and_embeddings(MODEL_PATHS['review_model'])
+        
         if model is not None and movie_embeddings is not None:
+            logger.info("Review model loaded successfully. Embeddings shape: %s", 
+                       len(movie_embeddings) if movie_embeddings else "None")
             models['review'] = (model, movie_embeddings)
-            logger.info("Successfully loaded review model")
         else:
-            logger.error("Failed to load review model")
+            logger.error("Failed to load review model - received None")
+            return None
             
         # Load subtitle model
-        with open(MODEL_PATHS['subtitle_model'], 'rb') as f:
-            subtitle_embeddings = pickle.load(f)
-            models['subtitle'] = subtitle_embeddings
-            logger.info("Successfully loaded subtitle model")
+        logger.info("Loading subtitle model from %s", MODEL_PATHS['subtitle_model'])
+        try:
+            with open(MODEL_PATHS['subtitle_model'], 'rb') as f:
+                subtitle_embeddings = pickle.load(f)
+                logger.info("Subtitle embeddings loaded. Size: %s", 
+                           len(subtitle_embeddings) if subtitle_embeddings else "None")
+                models['subtitle'] = subtitle_embeddings
+        except Exception as e:
+            logger.error("Error loading subtitle model: %s", str(e))
+            return None
             
+        logger.info("All models loaded successfully")
         return models
+        
     except Exception as e:
-        logger.error(f"Error loading models: {e}")
+        logger.exception("Unexpected error during model loading: %s", str(e))
         return None
+
+def initialize_app():
+    """Initialize all application data"""
+    global MODELS, clustering_results, CRITERION_MOVIES, REVIEW_MOVIES
+    
+    try:
+        # Load movie lists first (smaller files)
+        logger.info("Loading movie lists...")
+        with open("./data/criterion_movies.json", 'r') as f:
+            CRITERION_MOVIES = {movie['title'].lower(): movie for movie in json.load(f)}
+        logger.info(f"Loaded {len(CRITERION_MOVIES)} criterion movies")
+        
+        with open("./data/movies_list.json", 'r') as f:
+            REVIEW_MOVIES = {movie['title'].lower(): movie for movie in json.load(f)}
+        logger.info(f"Loaded {len(REVIEW_MOVIES)} review movies")
+        
+        # Initialize models
+        logger.info("Starting model initialization")
+        logger.info(f"Initial memory usage: {get_memory_usage():.2f} MB")
+        
+        MODELS = load_models()
+        if MODELS is None:
+            raise Exception("Failed to load models")
+            
+        logger.info(f"Memory after loading models: {get_memory_usage():.2f} MB")
+        gc.collect()
+        
+        # Initialize clustering
+        logger.info("Loading clustering results...")
+        clustering_results = load_or_create_clusters(MODELS)
+        if clustering_results is None:
+            raise Exception("Failed to load clustering results")
+            
+        logger.info(f"Final memory usage: {get_memory_usage():.2f} MB")
+        gc.collect()
+        
+        return True
+        
+    except Exception as e:
+        logger.exception(f"Error during initialization: {str(e)}")
+        return False
+
+# Initialize application
+logger.info("Starting application initialization")
+if not initialize_app():
+    logger.error("Failed to initialize application. Exiting...")
+    sys.exit(1)
+
+logger.info("Application initialization complete")
 
 @app.route("/recommend", methods=["POST"])
 def recommend():
@@ -101,7 +170,7 @@ def recommend():
             return jsonify({"error": "Username is required."}), 400
 
         # Load subtitle-based model first
-        with open("/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/models/advanced_subtitle_embeddings.pkl", 'rb') as f:
+        with open("./data/advanced_subtitle_embeddings.pkl", 'rb') as f:
             subtitle_embeddings = pickle.load(f)
 
         # Try Letterboxd first, passing subtitle_embeddings
@@ -168,7 +237,7 @@ def recommend():
 
 def get_user_reviews(username):
     """Retrieve user reviews from the Criterion Collection dataset."""
-    reviews_dir = "/Users/monroestephenson/Downloads/Criterion_Collection_Recomendation/raw_data/movie_reviews"
+    reviews_dir = "./data/movie_reviews"
     user_movies = []
     
     for json_file in os.listdir(reviews_dir):
@@ -467,31 +536,19 @@ def combine_recommendations(review_recs, subtitle_recs, weight_review=0.6):
 
 @app.route("/cluster_similar_movies/<movie_id>", methods=["GET"])
 def get_cluster_similar_movies(movie_id):
+    global MODELS, clustering_results
+    
+    if MODELS is None or clustering_results is None:
+        return jsonify({"error": "Models not initialized"}), 500
+        
     try:
-        # Load models if not already loaded
-        models = load_models()
-        if not models:
-            return jsonify({"error": "Failed to load models"}), 500
-            
-        # Get or create clustering results
-        if not hasattr(app, 'clustering_results'):
-            logger.info("Creating movie clusters...")
-            app.clustering_results = create_movie_clusters(
-                models['subtitle'],           # subtitle embeddings
-                models['review'],             # tuple of (model, review_embeddings)
-                n_clusters=20
-            )
-            
-        if not app.clustering_results:
-            return jsonify({"error": "Failed to create clusters"}), 500
-            
         # Find similar movies
-        similar_movies = find_similar_movies(movie_id, app.clustering_results)
+        similar_movies = find_similar_movies(movie_id, clustering_results)
         
         # Format response
         recommendations = []
         for similar_id, similarity in similar_movies:
-            metadata = models['subtitle'][similar_id]['metadata']
+            metadata = MODELS['subtitle'][similar_id]['metadata']
             recommendations.append({
                 'title': metadata.get('title', ''),
                 'similarity': round(similarity * 100, 1),
@@ -509,67 +566,13 @@ def get_cluster_similar_movies(movie_id):
         logger.exception("Error finding cluster-based similar movies")
         return jsonify({"error": str(e)}), 500
 
-def load_or_create_clusters(models):
-    """Load existing clusters or create new ones"""
-    # Try to load existing clusters
-    clustering_results = load_clustering_results(MODEL_PATHS['clustering_model'])
-    
-    if clustering_results is None:
-        logger.info("Creating new movie clusters...")
-        clustering_results = create_movie_clusters(
-            models['subtitle'],
-            models['review']
-        )
-        
-        if clustering_results:
-            save_clustering_results(clustering_results, MODEL_PATHS['clustering_model'])
-    
-    return clustering_results
-
-def initialize_models():
-    """Initialize all models"""
-    global app_models, clustering_results
-    
-    # Load base models
-    app_models = load_models()
-    if not app_models:
-        logger.error("Failed to load base models")
-        return
-        
-    # Debug logging
-    if 'subtitle' in app_models:
-        logger.info(f"Loaded subtitle embeddings for {len(app_models['subtitle'])} movies")
-        # Log a sample movie ID and its structure
-        sample_id = next(iter(app_models['subtitle']))
-        logger.info(f"Sample subtitle embedding structure for {sample_id}: {app_models['subtitle'][sample_id].keys()}")
-    
-    if 'review' in app_models:
-        model, embeddings = app_models['review']
-        logger.info(f"Loaded review embeddings for {len(embeddings)} movies")
-        # Log a sample movie ID and its structure
-        if embeddings:
-            sample_id = next(iter(embeddings))
-            logger.info(f"Sample review embedding structure for {sample_id}: {embeddings[sample_id].keys()}")
-    
-    # Load or create clusters
-    clustering_results = load_or_create_clusters(app_models)
-    if not clustering_results:
-        logger.error("Failed to load/create clusters")
-
-# Initialize models when the app starts
-initialize_models()
-
 @app.route("/recommendations/<movie_id>", methods=["GET"])
 def get_recommendations(movie_id):
-    """Get movie recommendations using clustering-based similarity"""
+    global MODELS, clustering_results
+    if MODELS is None or clustering_results is None:
+        return jsonify({"error": "Models not initialized"}), 500
+    
     try:
-        global clustering_results
-        if clustering_results is None:
-            # Try to initialize if not already done
-            clustering_results = load_or_create_clusters(app_models)
-            if clustering_results is None:
-                return jsonify({"error": "Models not initialized"}), 500
-            
         # Get similar movies using clustering
         similar_movies = find_similar_movies(movie_id, clustering_results)
         
@@ -577,7 +580,7 @@ def get_recommendations(movie_id):
         recommendations = []
         for similar_id, similarity in similar_movies:
             # Get metadata from subtitle embeddings
-            metadata = app_models['subtitle'][similar_id]['metadata']
+            metadata = MODELS['subtitle'][similar_id]['metadata']
             recommendations.append({
                 'title': metadata.get('title', ''),
                 'similarity': round(float(similarity) * 100, 1),  # Ensure similarity is a float
@@ -606,8 +609,8 @@ def recreate_clusters():
     """Admin endpoint to force cluster recreation"""
     try:
         clustering_results = create_movie_clusters(
-            app_models['subtitle'],
-            app_models['review']
+            MODELS['subtitle'],
+            MODELS['review']
         )
         
         if clustering_results:

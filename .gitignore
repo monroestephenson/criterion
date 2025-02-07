@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 venv/
 .env
+backend/data/*
+!backend/data/.gitkeep
 
 # Frontend
 frontend/favorite-movie-app/node_modules/
