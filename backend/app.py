@@ -174,6 +174,11 @@ def recommend():
         if subtitle_embeddings is None:
             return jsonify({"error": "Subtitle model not properly initialized"}), 500
 
+        # Extract review model and embeddings
+        model, movie_embeddings = MODELS['review']
+        if model is None or movie_embeddings is None:
+            return jsonify({"error": "Review model not properly initialized"}), 500
+
         # Try Letterboxd first, passing subtitle_embeddings
         user_movies = get_letterboxd_reviews(username, subtitle_embeddings)
         
