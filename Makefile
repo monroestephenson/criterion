@@ -15,7 +15,7 @@ GREEN = \033[0;32m
 NC = \033[0m # No Color
 RED = \033[0;31m
 
-.PHONY: all install clean run build test up down docker-build verify-models rebuild-models
+.PHONY: all install clean run build test up down docker-build verify-models rebuild-models deploy-lambda
 
 # Default target
 all: install build
@@ -129,3 +129,9 @@ help:
 	@echo "  make clean       - Clean build artifacts and stop containers"
 	@echo "  make dev         - Start development environment"
 	@echo "  make docker-build - Build Docker images"
+	@echo "  make deploy-lambda - Deploy to AWS Lambda"
+
+# Add these lines to your existing Makefile
+deploy-lambda: verify-models
+	@echo "Deploying to AWS Lambda..."
+	cd $(BACKEND_DIR) && AWS_PROFILE=data-admin AWS_DEFAULT_REGION=eu-west-1 $(PYTHON) scripts/deploy_lambda.py

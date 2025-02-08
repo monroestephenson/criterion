@@ -1,0 +1,45 @@
+# Use specific platform tag
+FROM --platform=linux/amd64 public.ecr.aws/lambda/python:3.9-x86_64
+
+# Set working directory
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+# Install system dependencies first
+RUN yum update -y && \
+    yum groupinstall -y "Development Tools" && \
+    yum install -y \
+    gcc \
+    gcc-c++ \
+    python3-devel \
+    swig \
+    make \
+    cmake \
+    openblas-devel
+
+# Install dependencies in order
+COPY requirements.txt .
+
+# Install numpy first (needed for faiss-cpu)
+RUN pip install --no-cache-dir numpy
+
+# Install faiss-cpu separately with specific version
+RUN pip install --no-cache-dir faiss-cpu==1.7.4
+
+# Install the rest of the requirements
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir mangum
+
+# Create necessary directories
+RUN mkdir -p data/model_cache data/models
+
+# Copy model files first
+COPY ./data/model_cache/transformer_model.pkl ./data/model_cache/
+COPY ./data/model_cache/movie_embeddings.pkl ./data/model_cache/
+COPY ./data/models/advanced_subtitle_embeddings.pkl ./data/models/
+COPY ./data/models/movie_clusters.pkl ./data/models/
+
+# Copy the rest of the application
+COPY . .
+
+# Set the CMD to your handler
+CMD [ "lambda_handler.handler" ] 

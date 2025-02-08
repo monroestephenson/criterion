@@ -13,8 +13,6 @@ from transformer_builder import (
     save_model_and_embeddings,
     split_user_data,
     evaluate_recommendations
-    # Remove or comment out test_specific_user if not needed
-    # test_specific_user
 )
 from bs4 import BeautifulSoup
 import requests
@@ -63,9 +61,9 @@ CRITERION_MOVIES = None
 REVIEW_MOVIES = None
 
 MODEL_PATHS = {
-    'review_model': "./data/model_cache",
-    'subtitle_model': "./data/models/advanced_subtitle_embeddings.pkl",
-    'clustering_model': "./data/models/movie_clusters.pkl"
+    'review_model': "/var/task/data/model_cache",
+    'subtitle_model': "/var/task/data/models/advanced_subtitle_embeddings.pkl",
+    'clustering_model': "/var/task/data/models/movie_clusters.pkl"
 }
 
 def load_models():
@@ -631,7 +629,6 @@ def recreate_clusters():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    # Remove or comment out the test line
-    # test_manual_recommendation("sorefined")
-    # Enable the Flask server
-    app.run(debug=True, port=5001, host='0.0.0.0')
+    # Only run the Flask dev server when not in Lambda
+    if not os.getenv('AWS_LAMBDA_FUNCTION_NAME'):
+        app.run(debug=True, port=5001)
