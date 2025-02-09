@@ -1,13 +1,14 @@
 flask
 flask-cors
 sentence-transformers
-numpy
+numpy<2.0.0
 tqdm
 torch
 beautifulsoup4
 requests
 scikit-learn
-faiss-cpu
+faiss-cpu==1.7.4
+asgiref
 pickle5
 psutil==5.9.8
 mangum>=0.17.0

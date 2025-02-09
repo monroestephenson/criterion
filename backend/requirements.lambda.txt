@@ -1,0 +1,15 @@
+flask
+flask-cors
+sentence-transformers==2.2.2
+numpy==1.24.3
+faiss-cpu==1.7.4
+mangum>=0.17.0
+boto3>=1.26.0
+beautifulsoup4
+requests
+scikit-learn
+psutil==5.9.8
+pickle5
+tqdm
+torch
+asgiref

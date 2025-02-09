@@ -60,10 +60,11 @@ clustering_results = None
 CRITERION_MOVIES = None
 REVIEW_MOVIES = None
 
+# Use environment variables for paths
 MODEL_PATHS = {
-    'review_model': "/var/task/data/model_cache",
-    'subtitle_model': "/var/task/data/models/advanced_subtitle_embeddings.pkl",
-    'clustering_model': "/var/task/data/models/movie_clusters.pkl"
+    'review_model': os.getenv('CACHE_PATH', "/var/task/data/model_cache"),
+    'subtitle_model': os.path.join(os.getenv('MODEL_PATH', "/var/task/data/models"), 'advanced_subtitle_embeddings.pkl'),
+    'clustering_model': os.path.join(os.getenv('MODEL_PATH', "/var/task/data/models"), 'movie_clusters.pkl')
 }
 
 def load_models():
@@ -159,14 +160,53 @@ logger.info("Application initialization complete")
 
 @app.route("/recommend", methods=["POST"])
 def recommend():
+    """Get recommendations for a user"""
+    logger.info("=== Flask Route Start ===")
+    logger.info(f"Request Method: {request.method}")
+    logger.info(f"Request Headers: {dict(request.headers)}")
+    logger.info(f"Request Content-Type: {request.content_type}")
+    logger.info(f"Raw Data Length: {len(request.get_data()) if request.get_data() else 0}")
+    
     try:
-        data = request.get_json()
-        username = data.get("username")
-        logger.info(f"Received request for username: {username}")
+        # Try different methods to get the request data
+        raw_data = request.get_data()
+        logger.info(f"Raw request data: {raw_data}")
         
-        if not username:
-            return jsonify({"error": "Username is required."}), 400
+        # Check headers for raw body
+        raw_body = request.headers.get('X-Raw-Body')
+        if raw_body:
+            logger.info(f"Found raw body in headers: {raw_body}")
+            try:
+                data = json.loads(raw_body)
+                logger.info("Successfully parsed body from headers")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse body from headers: {e}")
+                raise
+        else:
+            # Try normal JSON parsing
+            try:
+                if request.is_json:
+                    logger.info("Request is JSON, attempting to parse")
+                    data = request.get_json(force=True)
+                else:
+                    logger.info("Request is not JSON, trying raw data")
+                    raw_data = request.get_data()
+                    if isinstance(raw_data, bytes):
+                        raw_data = raw_data.decode('utf-8')
+                    data = json.loads(raw_data)
+            except Exception as e:
+                logger.error(f"Error parsing request data: {e}")
+                logger.error("Stack trace:", exc_info=True)
+                return jsonify({"error": f"Failed to parse request data: {str(e)}"}), 400
 
+        logger.info(f"Successfully parsed data: {data}")
+        
+        username = data.get('username')
+        if not username:
+            return jsonify({"error": "Username is required"}), 400
+
+        logger.info(f"Processing recommendation request for user: {username}")
+        
         # Use already loaded subtitle embeddings from MODELS
         subtitle_embeddings = MODELS['subtitle']
         if subtitle_embeddings is None:
@@ -236,7 +276,7 @@ def recommend():
         return jsonify(response)
 
     except Exception as e:
-        logger.exception("Error processing recommendation request")
+        logger.error("Error processing recommendation request", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 def get_user_reviews(username):
